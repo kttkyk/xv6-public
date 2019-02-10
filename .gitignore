@@ -14,3 +14,15 @@ kernel
 kernelmemfs
 mkfs
 .gdbinit
+
+GPATH
+GTAGS
+GRTAGS
+
+qemu/*
+
+
+.gdb_history
+core
+gdb-7.3.1.tar.bz2
+gdb-7.3.1/*
