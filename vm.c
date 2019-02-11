@@ -39,7 +39,10 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
   pte_t *pgtab;
 
   pde = &pgdir[PDX(va)];
-  if(*pde & PTE_P){
+  if (kpgdir != 0 && INKERNRANGE(va)) {
+      pgtab = P2V(kpgdir[PDX(va)]);
+      *pde = V2P(pgtab) | PTE_P | PTE_W | PTE_U;
+  } else if(*pde & PTE_P){
     pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
   } else {
     if(!alloc || (pgtab = (pte_t*)kalloc()) == 0)
@@ -68,9 +71,10 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
   for(;;){
     if((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_P)
+    if(!INKERNRANGE(va) && (*pte & PTE_P))
       panic("remap");
-    *pte = pa | perm | PTE_P;
+    if (kpgdir == 0 || !INKERNRANGE(va))
+        *pte = pa | perm | PTE_P;
     if(a == last)
       break;
     a += PGSIZE;
@@ -114,6 +118,7 @@ static struct kmap {
  { (void*)DEVSPACE, DEVSPACE,      0,         PTE_W}, // more devices
 };
 
+
 // Set up kernel part of a page table.
 pde_t*
 setupkvm(void)
@@ -134,6 +139,7 @@ setupkvm(void)
     }
   return pgdir;
 }
+
 
 // Allocate one page table for the machine for the kernel address
 // space for scheduler processes.
@@ -291,7 +297,10 @@ freevm(pde_t *pgdir)
   for(i = 0; i < NPDENTRIES; i++){
     if(pgdir[i] & PTE_P){
       char * v = P2V(PTE_ADDR(pgdir[i]));
-      kfree(v);
+      // Don't free PTEs pointing to the kernel
+      // it's shared across processes!
+      if (!INKERNRANGE(v))
+          kfree(v);
     }
   }
   kfree((char*)pgdir);
