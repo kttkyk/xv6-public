@@ -50,6 +50,15 @@ entry:
   # Set page directory
   movl    $(V2P_WO(entrypgdir)), %eax
   movl    %eax, %cr3
+  # Set PTE_W | PTE_P flags to PDE entrypgdir[0] and entrypgdir[512]
+  movl    $0, %ecx
+  movl    (%eax, %ecx, 4), %ebx
+  orl     $(PTE_W|PTE_P), %ebx
+  movl    %ebx, (%eax, %ecx, 4)
+  movl    $512, %ecx
+  movl    (%eax, %ecx, 4), %ebx
+  orl     $(PTE_W|PTE_P), %ebx
+  movl    %ebx, (%eax, %ecx, 4)
   # Turn on paging.
   movl    %cr0, %eax
   orl     $(CR0_PG|CR0_WP), %eax

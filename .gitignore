@@ -19,10 +19,12 @@ GPATH
 GTAGS
 GRTAGS
 
-qemu/*
+qemu/
 
 
 .gdb_history
 core
 gdb-7.3.1.tar.bz2
-gdb-7.3.1/*
+gdb-7.3.1/
+
+tags
