@@ -56,7 +56,7 @@ endif
 
 # Try to infer the correct QEMU
 ifndef QEMU
-QEMU = "/home/ty/work/xv6-public/qemu/bin/qemu-system-i386"
+QEMU = /home/ty/work/xv6-public/qemu/x86_64-softmmu/qemu-system-x86_64
 # QEMU = $(shell if which qemu > /dev/null; \
 	then echo qemu; exit; \
 	elif which qemu-system-i386 > /dev/null; \
@@ -176,6 +176,7 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
+	_invessbrk\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
@@ -245,7 +246,7 @@ qemu-nox-gdb: fs.img xv6.img .gdbinit
 EXTRA=\
 	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c kill.c\
 	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
-	printf.c umalloc.c\
+	printf.c umalloc.c invessbrk.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\
 
