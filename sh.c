@@ -131,9 +131,10 @@ runcmd(struct cmd *cmd)
 }
 
 int
-getcmd(char *buf, int nbuf)
+getcmd(char *buf, int nbuf, int print_prompt)
 {
-  printf(2, "$ ");
+    if (print_prompt)
+      printf(2, "$ ");
   memset(buf, 0, nbuf);
   gets(buf, nbuf);
   if(buf[0] == 0) // EOF
@@ -142,7 +143,7 @@ getcmd(char *buf, int nbuf)
 }
 
 int
-main(void)
+main(int argc, char *argv[])
 {
   static char buf[100];
   int fd;
@@ -155,14 +156,28 @@ main(void)
     }
   }
 
+  // If sh (this program) is executed from the shell
+  // interprate the provided file as shell script
+  if (argc > 1) {
+      close(0);
+      fd = open(argv[1], O_RDONLY); // Connect the input file to standard input i.e., 0
+      if (fd < 0) {
+          printf(2, "Can't open %s\n", argv[1]);
+          exit();
+      }
+  }
+
   // Read and run input commands.
-  while(getcmd(buf, sizeof(buf)) >= 0){
+  while(getcmd(buf, sizeof(buf), !(argc > 1)) >= 0){
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
       buf[strlen(buf)-1] = 0;  // chop \n
       if(chdir(buf+3) < 0)
         printf(2, "cannot cd %s\n", buf+3);
       continue;
+    } else if (buf[0] == '#') {
+        // ignore comments
+        continue;
     }
     if(fork1() == 0)
       runcmd(parsecmd(buf));
