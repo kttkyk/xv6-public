@@ -12,137 +12,137 @@
 int
 exec(char *path, char **argv)
 {
-    char *s, *last;
-    char interpreter[INTERPRETER_LENGTH];
-    int i, off;
-    uint argc, sz, sp, ustack[3+MAXARG+1];
-    struct elfhdr elf;
-    struct inode *ip;
-    struct proghdr ph;
-    pde_t *pgdir, *oldpgdir;
-    struct proc *curproc = myproc();
+  char *s, *last;
+  char interpreter[INTERPRETER_LENGTH];
+  int i, off;
+  uint argc, sz, sp, ustack[3+MAXARG+1];
+  struct elfhdr elf;
+  struct inode *ip;
+  struct proghdr ph;
+  pde_t *pgdir, *oldpgdir;
+  struct proc *curproc = myproc();
 
-    begin_op();
+  begin_op();
 
-    if((ip = namei(path)) == 0){
-        end_op();
-        cprintf("exec: fail\n");
-        return -1;
+  if((ip = namei(path)) == 0){
+    end_op();
+    cprintf("exec: fail\n");
+    return -1;
+  }
+  ilock(ip);
+  pgdir = 0;
+
+  // Is it ELF or shebang script?
+  if(readi(ip, (char*)&elf, 0, sizeof(elf)) != sizeof(elf)
+      && !(((char *)&elf)[0] == '#' && ((char *)&elf)[1] == '!'))
+    goto bad;
+
+  // Handle shebang stuff
+  if (((char *)&elf)[0] == '#' && ((char *)&elf)[1] == '!') {
+    i = 2;
+    while (((char *)&elf)[i++] != '\n')
+      interpreter[i - 3] = ((char *)&elf)[i];
+    interpreter[i - 3 - 1] = '\0';
+
+    // unlock and put inode for the shebang script
+    iunlockput(ip);
+    if((ip = namei(interpreter)) == 0){
+      end_op();
+      cprintf("exec (shebang): fail with interpreter %s\n", interpreter);
+      return -1;
     }
     ilock(ip);
-    pgdir = 0;
 
-    // Is it ELF or shebang script?
-    if(readi(ip, (char*)&elf, 0, sizeof(elf)) != sizeof(elf)
-            && !(((char *)&elf)[0] == '#' && ((char *)&elf)[1] == '!'))
-        goto bad;
+    // slide argv to the right and insert interpreter at the front
+    // $ script.sh argument -> $ sh script.sh argument
+    for (i = 0; argv[i + 1] != 0; i++) ;
+    for ( ; i >= 0; i--)
+      argv[i + 1] = argv[i];
+    argv[0] = interpreter; // can interpreter be referenced? (isn't this on kernel stack?)
 
-    // Handle shebang stuff
-    if (((char *)&elf)[0] == '#' && ((char *)&elf)[1] == '!') {
-        i = 2;
-        while (((char *)&elf)[i++] != '\n')
-            interpreter[i - 3] = ((char *)&elf)[i];
-        interpreter[i - 3 - 1] = '\0';
+    // load ELF header of interpreter
+    if (readi(ip, (char *)&elf, 0, sizeof(elf)) != sizeof(elf))
+      goto bad;
+  }
 
-        // unlock and put inode for the shebang script
-        iunlockput(ip);
-        if((ip = namei(interpreter)) == 0){
-            end_op();
-            cprintf("exec (shebang): fail with interpreter %s\n", interpreter);
-            return -1;
-        }
-        ilock(ip);
+  if(elf.magic != ELF_MAGIC)
+    goto bad;
 
-        // slide argv to the right and insert interpreter at the front
-        // $ script.sh argument -> $ sh script.sh argument
-        for (i = 0; argv[i + 1] != 0; i++) ;
-        for ( ; i >= 0; i--)
-            argv[i + 1] = argv[i];
-        argv[0] = interpreter; // can interpreter be referenced? (isn't this on kernel stack?)
+  if((pgdir = setupkvm()) == 0)
+    goto bad;
 
-        // load ELF header of interpreter
-        if (readi(ip, (char *)&elf, 0, sizeof(elf)) != sizeof(elf))
-            goto bad;
-    }
+  // Load program into memory.
+  sz = 0;
+  for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
+    if(readi(ip, (char*)&ph, off, sizeof(ph)) != sizeof(ph))
+      goto bad;
+    if(ph.type != ELF_PROG_LOAD)
+      continue;
+    if(ph.memsz < ph.filesz)
+      goto bad;
+    if(ph.vaddr + ph.memsz < ph.vaddr)
+      goto bad;
+    if((sz = allocuvm(pgdir, sz, ph.vaddr + ph.memsz)) == 0)
+      goto bad;
+    if(ph.vaddr % PGSIZE != 0)
+      goto bad;
+    if(loaduvm(pgdir, (char*)ph.vaddr, ip, ph.off, ph.filesz) < 0)
+      goto bad;
+  }
+  iunlockput(ip);
+  end_op();
+  ip = 0;
 
-    if(elf.magic != ELF_MAGIC)
-        goto bad;
+  // Allocate two pages at the next page boundary.
+  // Make the first inaccessible.  Use the second as the user stack.
+  sz = PGROUNDUP(sz);
+  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
+    goto bad;
+  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
+  sp = sz;
 
-    if((pgdir = setupkvm()) == 0)
-        goto bad;
+  // Push argument strings, prepare rest of stack in ustack.
+  for(argc = 0; argv[argc]; argc++) {
+    if(argc >= MAXARG)
+      goto bad;
+    sp = (sp - (strlen(argv[argc]) + 1)) & ~3;
+    if(copyout(pgdir, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
+      goto bad;
+    ustack[3+argc] = sp;
+  }
+  ustack[3+argc] = 0;
 
-    // Load program into memory.
-    sz = 0;
-    for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
-        if(readi(ip, (char*)&ph, off, sizeof(ph)) != sizeof(ph))
-            goto bad;
-        if(ph.type != ELF_PROG_LOAD)
-            continue;
-        if(ph.memsz < ph.filesz)
-            goto bad;
-        if(ph.vaddr + ph.memsz < ph.vaddr)
-            goto bad;
-        if((sz = allocuvm(pgdir, sz, ph.vaddr + ph.memsz)) == 0)
-            goto bad;
-        if(ph.vaddr % PGSIZE != 0)
-            goto bad;
-        if(loaduvm(pgdir, (char*)ph.vaddr, ip, ph.off, ph.filesz) < 0)
-            goto bad;
-    }
-    iunlockput(ip);
-    end_op();
-    ip = 0;
+  ustack[0] = 0xffffffff;  // fake return PC
+  ustack[1] = argc;
+  ustack[2] = sp - (argc+1)*4;  // argv pointer
 
-    // Allocate two pages at the next page boundary.
-    // Make the first inaccessible.  Use the second as the user stack.
-    sz = PGROUNDUP(sz);
-    if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
-        goto bad;
-    clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
-    sp = sz;
+  sp -= (3+argc+1) * 4;
+  if(copyout(pgdir, sp, ustack, (3+argc+1)*4) < 0)
+    goto bad;
 
-    // Push argument strings, prepare rest of stack in ustack.
-    for(argc = 0; argv[argc]; argc++) {
-        if(argc >= MAXARG)
-            goto bad;
-        sp = (sp - (strlen(argv[argc]) + 1)) & ~3;
-        if(copyout(pgdir, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
-            goto bad;
-        ustack[3+argc] = sp;
-    }
-    ustack[3+argc] = 0;
+  // Save program name for debugging.
+  for(last=s=path; *s; s++)
+    if(*s == '/')
+      last = s+1;
+  safestrcpy(curproc->name, last, sizeof(curproc->name));
 
-    ustack[0] = 0xffffffff;  // fake return PC
-    ustack[1] = argc;
-    ustack[2] = sp - (argc+1)*4;  // argv pointer
-
-    sp -= (3+argc+1) * 4;
-    if(copyout(pgdir, sp, ustack, (3+argc+1)*4) < 0)
-        goto bad;
-
-    // Save program name for debugging.
-    for(last=s=path; *s; s++)
-        if(*s == '/')
-            last = s+1;
-    safestrcpy(curproc->name, last, sizeof(curproc->name));
-
-    // Commit to the user image.
-    oldpgdir = curproc->pgdir;
-    curproc->pgdir = pgdir;
-    curproc->sz = sz;
-    curproc->tf->eip = elf.entry;  // main
-    curproc->tf->esp = sp;
-    switchuvm(curproc);
-    freevm(oldpgdir);
-    return 0;
+  // Commit to the user image.
+  oldpgdir = curproc->pgdir;
+  curproc->pgdir = pgdir;
+  curproc->sz = sz;
+  curproc->tf->eip = elf.entry;  // main
+  curproc->tf->esp = sp;
+  switchuvm(curproc);
+  freevm(oldpgdir);
+  return 0;
 
 bad:
-    cprintf("exec entered bad\n");
-    if(pgdir)
-        freevm(pgdir);
-    if(ip){
-        iunlockput(ip);
-        end_op();
-    }
-    return -1;
+  cprintf("exec entered bad\n");
+  if(pgdir)
+    freevm(pgdir);
+  if(ip){
+    iunlockput(ip);
+    end_op();
+  }
+  return -1;
 }

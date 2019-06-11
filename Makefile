@@ -177,6 +177,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_invessbrk\
+	_date\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
