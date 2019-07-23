@@ -13,7 +13,7 @@
 #define INKERNRANGE(a) (KERNBASE <= ((uint) (a)) && ((uint) (a)) < DEVSPACE)
 
 #define V2P(a) (((uint) (a)) - KERNBASE)
-#define P2V(a) (((void *) (a)) + KERNBASE)
+#define P2V(a) ((void *)(((char *) (a)) + KERNBASE))
 
 #define V2P_WO(x) ((x) - KERNBASE)    // same as V2P, but without casts
 #define P2V_WO(x) ((x) + KERNBASE)    // same as P2V, but without casts
