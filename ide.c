@@ -138,6 +138,7 @@ void
 iderw(struct buf *b)
 {
   struct buf **pp;
+  int i;
 
   if(!holdingsleep(&b->lock))
     panic("iderw: buf not locked");
@@ -146,18 +147,27 @@ iderw(struct buf *b)
   if(b->dev != 0 && !havedisk1)
     panic("iderw: ide disk 1 not present");
 
-  acquire(&idelock);  //DOC:acquire-lock
+  // Move this acquire from here to just before sleep below (Exercise 4-3)
+  // acquire(&idelock);  //DOC:acquire-lock
 
   // Append b to idequeue.
   b->qnext = 0;
   for(pp=&idequeue; *pp; pp=&(*pp)->qnext)  //DOC:insert-queue
     ;
+
+  for (i = 0; i < 100000000; i++) // Dummy loop
+    ;
+
+  // The loop above stops when the qnext pointer is empty.
+  // So writing to pp will append b to idequeue.
   *pp = b;
 
   // Start disk if necessary.
   if(idequeue == b)
     idestart(b);
 
+  // Acquire moved here
+  acquire(&idelock);  //DOC:acquire-lock
   // Wait for request to finish.
   while((b->flags & (B_VALID|B_DIRTY)) != B_VALID){
     sleep(b, &idelock);
