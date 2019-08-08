@@ -40,7 +40,7 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
 
   pde = &pgdir[PDX(va)];
   if (kpgdir != 0 && INKERNRANGE(va)) {
-      pgtab = P2V(kpgdir[PDX(va)]);
+      pgtab = P2V(PTE_ADDR(kpgdir[PDX(va)]));
       *pde = V2P(pgtab) | PTE_P | PTE_W | PTE_U;
   } else if(*pde & PTE_P){
     pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
@@ -306,6 +306,46 @@ freevm(pde_t *pgdir)
   kfree((char*)pgdir);
 }
 
+// Free page table.
+// Do not free physical memory pages.
+void
+freesharedvm(pde_t *pgdir)
+{
+  uint i;
+  if (pgdir == 0)
+    panic("freesharedvm: no pgdir");
+  for(i = 0; i < NPDENTRIES; i++){
+    if(pgdir[i] & PTE_P){
+      char * v = P2V(PTE_ADDR(pgdir[i]));
+      // Don't free PTEs pointing to the kernel
+      // it's shared across processes!
+      if (!INKERNRANGE(v))
+        kfree(v);
+    }
+  }
+}
+
+// Free a single page of given address on pgdir
+// Use to free single paged stack.
+void
+freevmpage(pde_t *pgdir, void *va)
+{
+  pte_t *pte;
+  uint pa;
+  char *v;
+  if (pgdir == 0)
+    panic("freevmpage: no pgdir");
+  if ((pte = walkpgdir(pgdir, va, 0)) == 0)
+    panic("freevmpage: pte should exist");
+  if (!(*pte & PTE_P))
+    panic("freevmpage: page not present");
+
+  pa = PTE_ADDR(*pte);
+  v = P2V(pa);
+  kfree(v);
+  *pte = 0;
+}
+
 // Clear PTE_U on a page. Used to create an inaccessible
 // page beneath the user stack.
 void
@@ -351,6 +391,73 @@ copyuvm(pde_t *pgdir, uint sz)
 bad:
   freevm(d);
   return 0;
+}
+
+pde_t*
+shareuvm(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, flags, i;
+
+  if ((d = setupkvm()) == 0)
+      return 0;
+
+  for(i = 0; i < sz; i += PGSIZE) {
+    if ((pte = walkpgdir(pgdir, (void *)i, 0)) == 0)
+      panic("shareuvm: pte should exist");
+    if (!(*pte & PTE_P))
+      panic("shareuvm: page not present");
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+    if (mappages(d, (void *)i, PGSIZE, pa, flags) , 0)
+      goto bad;
+  }
+  return d;
+
+bad:
+  freevm(d);
+  return 0;
+}
+
+// Given a parent process's current page table and an address of a page,
+// create a copy of the page and map it at the same address on the new page table.
+// Set force flag_map if we want to force remapping a already mapped page.
+// Becareful or this will cause memory leak.
+pde_t*
+copyuvmpage(pde_t *newpgdir, pde_t *curpgdir, const void *va, uint force_remap)
+{
+  uint a, pa, flags;
+  char *mem;
+  pte_t *newpte, *curpte;
+
+  // Get rounded down virtual address
+  a = PGROUNDDOWN((uint)va);
+  if ((curpte = walkpgdir(curpgdir, (void *)a, 0)) == 0)
+    panic("copyuvmpage: curpte should exist");
+  if (!(*curpte & PTE_P))
+    panic("copyuvmpage: current page not present");
+
+  // Allocate new page
+  if ((mem = kalloc()) == 0)
+    return 0;
+  pa = PTE_ADDR(*curpte);
+  flags = PTE_FLAGS(*curpte);
+  memmove(mem, (char *)P2V(pa), PGSIZE);
+
+  if ((newpte = walkpgdir(newpgdir, (void *)a, 0)) == 0)
+    panic("copyuvmpage: newpte should exist");
+  if (force_remap && (*newpte & PTE_P)) {
+    // Deliberately clear PTE_P flag to avoid panic("remap") in mappages
+    *newpte = *curpte ^ PTE_P;
+  }
+
+  if (mappages(newpgdir, (void *)a, PGSIZE, V2P(mem), flags) < 0) {
+    kfree(mem);
+    return 0;
+  }
+
+  return newpgdir;
 }
 
 //PAGEBREAK!

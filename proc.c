@@ -88,6 +88,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->numclone = 0;
 
   release(&ptable.lock);
 
@@ -203,6 +204,9 @@ fork(void)
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
+  // Copy page address of ustack from parent
+  np->ustackpage = curproc->ustackpage;
+
   for(i = 0; i < NOFILE; i++)
     if(curproc->ofile[i])
       np->ofile[i] = filedup(curproc->ofile[i]);
@@ -215,6 +219,66 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+
+  release(&ptable.lock);
+
+  return pid;
+}
+
+// Sets up stack to return as if from system call.
+// clone will alloc process, stack and kvm,
+// but share some of user memory space, by copying the page directory table.
+// It will share text, bss, but have it's own stack (copy from parent process).
+// In short, clone is same as fork, but it shares memory except for stack.
+int
+clone(void)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *curproc = myproc();
+
+  if ((np = allocproc()) == 0) {
+    return -1;
+  }
+
+  if ((np->pgdir = shareuvm(curproc->pgdir, curproc->sz)) < 0) {
+    kfree(np->kstack);
+    np->kstack = 0;
+    np->state = UNUSED;
+    return -1;
+  }
+
+  // Copy user stack
+  if ((np->pgdir = copyuvmpage(np->pgdir, curproc->pgdir, (void *)PGROUNDDOWN(curproc->tf->esp), 1)) == 0) {
+      kfree(np->kstack);
+      np->kstack = 0;
+      np->state = UNUSED;
+      return -1;
+  }
+
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  *np->tf = *curproc->tf;
+
+  np->tf->eax = 0;
+
+  // Copy page address of ustack from parent
+  np->ustackpage = curproc->ustackpage;
+
+  for(i = 0; i < NOFILE; i++)
+    if(curproc->ofile[i])
+      np->ofile[i] = filedup(curproc->ofile[i]);
+  np->cwd = idup(curproc->cwd);
+
+  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+
+  pid = np->pid;
+
+  acquire(&ptable.lock);
+
+  (curproc->numclone)++;
+  np->state = RUNNABLE;
+  np->numclone = curproc->numclone;
 
   release(&ptable.lock);
 
@@ -289,12 +353,19 @@ wait(void)
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
-        freevm(p->pgdir);
+        if (curproc->numclone > 0) {
+          freevmpage(p->pgdir, p->ustackpage);
+          freesharedvm(p->pgdir);
+          (curproc->numclone)--;
+        } else {
+          freevm(p->pgdir);
+        }
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
         p->state = UNUSED;
+        p->numclone = 0;
         release(&ptable.lock);
         return pid;
       }

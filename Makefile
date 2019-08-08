@@ -185,6 +185,7 @@ UPROGS=\
 	_zombie\
 	_invessbrk\
 	_date\
+	_clonetest\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
