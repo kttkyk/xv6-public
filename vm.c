@@ -420,46 +420,6 @@ bad:
   return 0;
 }
 
-// Given a parent process's current page table and an address of a page,
-// create a copy of the page and map it at the same address on the new page table.
-// Set force flag_map if we want to force remapping a already mapped page.
-// Becareful or this will cause memory leak.
-pde_t*
-copyuvmpage(pde_t *newpgdir, pde_t *curpgdir, const void *va, uint force_remap)
-{
-  uint a, pa, flags;
-  char *mem;
-  pte_t *newpte, *curpte;
-
-  // Get rounded down virtual address
-  a = PGROUNDDOWN((uint)va);
-  if ((curpte = walkpgdir(curpgdir, (void *)a, 0)) == 0)
-    panic("copyuvmpage: curpte should exist");
-  if (!(*curpte & PTE_P))
-    panic("copyuvmpage: current page not present");
-
-  // Allocate new page
-  if ((mem = kalloc()) == 0)
-    return 0;
-  pa = PTE_ADDR(*curpte);
-  flags = PTE_FLAGS(*curpte);
-  memmove(mem, (char *)P2V(pa), PGSIZE);
-
-  if ((newpte = walkpgdir(newpgdir, (void *)a, 0)) == 0)
-    panic("copyuvmpage: newpte should exist");
-  if (force_remap && (*newpte & PTE_P)) {
-    // Deliberately clear PTE_P flag to avoid panic("remap") in mappages
-    *newpte = *curpte ^ PTE_P;
-  }
-
-  if (mappages(newpgdir, (void *)a, PGSIZE, V2P(mem), flags) < 0) {
-    kfree(mem);
-    return 0;
-  }
-
-  return newpgdir;
-}
-
 //PAGEBREAK!
 // Map user virtual address to kernel address.
 char*

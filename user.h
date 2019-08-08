@@ -1,9 +1,11 @@
 struct stat;
 struct rtcdate;
 
+typedef int thread_t;
+
 // system calls
 int fork(void);
-int clone(void);
+int clone(void (*)(), uint);
 int exit(void) __attribute__((noreturn));
 int wait(void);
 int pipe(int*);
@@ -39,3 +41,7 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+
+// uthread.c
+thread_t thread_create(void (*)());
+int thread_join(thread_t);

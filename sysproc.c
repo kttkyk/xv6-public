@@ -16,7 +16,13 @@ sys_fork(void)
 int
 sys_clone(void)
 {
-  return clone();
+  uint eip, esp;
+
+  if (argint(0, (int *)&eip) < 0)
+    return -1;
+  if (argint(1, (int *)&esp) < 0)
+    return -1;
+  return clone(eip, esp);
 }
 
 int

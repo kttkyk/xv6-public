@@ -231,7 +231,7 @@ fork(void)
 // It will share text, bss, but have it's own stack (copy from parent process).
 // In short, clone is same as fork, but it shares memory except for stack.
 int
-clone(void)
+clone(uint eip, uint esp)
 {
   int i, pid;
   struct proc *np;
@@ -248,17 +248,13 @@ clone(void)
     return -1;
   }
 
-  // Copy user stack
-  if ((np->pgdir = copyuvmpage(np->pgdir, curproc->pgdir, (void *)PGROUNDDOWN(curproc->tf->esp), 1)) == 0) {
-      kfree(np->kstack);
-      np->kstack = 0;
-      np->state = UNUSED;
-      return -1;
-  }
-
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+
+  // Return to specified eip
+  np->tf->eip = eip;
+  np->tf->esp = esp;
 
   np->tf->eax = 0;
 
@@ -354,7 +350,6 @@ wait(void)
         kfree(p->kstack);
         p->kstack = 0;
         if (curproc->numclone > 0) {
-          freevmpage(p->pgdir, p->ustackpage);
           freesharedvm(p->pgdir);
           (curproc->numclone)--;
         } else {
