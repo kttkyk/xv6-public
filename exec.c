@@ -101,11 +101,6 @@ exec(char *path, char **argv)
   clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
   sp = sz;
 
-  // TODO: Check if the next line is correct.
-  // sp is pointing at address just after where the stack page ends.
-  // So subtract 1 before rouding down to point to the stack page.
-  curproc->ustackpage = (char *)PGROUNDDOWN(sp - 1);
-
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)

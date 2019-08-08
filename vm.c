@@ -325,27 +325,6 @@ freesharedvm(pde_t *pgdir)
   }
 }
 
-// Free a single page of given address on pgdir
-// Use to free single paged stack.
-void
-freevmpage(pde_t *pgdir, void *va)
-{
-  pte_t *pte;
-  uint pa;
-  char *v;
-  if (pgdir == 0)
-    panic("freevmpage: no pgdir");
-  if ((pte = walkpgdir(pgdir, va, 0)) == 0)
-    panic("freevmpage: pte should exist");
-  if (!(*pte & PTE_P))
-    panic("freevmpage: page not present");
-
-  pa = PTE_ADDR(*pte);
-  v = P2V(pa);
-  kfree(v);
-  *pte = 0;
-}
-
 // Clear PTE_U on a page. Used to create an inaccessible
 // page beneath the user stack.
 void
